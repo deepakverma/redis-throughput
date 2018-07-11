@@ -34,25 +34,48 @@ namespace ConsoleApplication115
             Console.WriteLine();
 
             ConnectionMultiplexer []cm = new ConnectionMultiplexer[numberofconnections];
-            ConfigurationOptions config = new ConfigurationOptions();
-            config.CommandMap = CommandMap.Create(new HashSet<string>(new string[] { "SUBSCRIBE" }), false);
-            config.Ssl = ssl;
-            config.EndPoints.Add(host);
-            config.ResponseTimeout = Int32.MaxValue;
-            config.Password = password;
-            config.AllowAdmin = true;
-            config.AbortOnConnectFail = true;
+            int chooseconnection = 0;
+            // config.EndPoints.Add(host, 15001);
             for (int i = 0; i < numberofconnections; i++)
             {
+                ConfigurationOptions config = new ConfigurationOptions();
+                config.CommandMap = CommandMap.Create(new HashSet<string>(new string[] { "SUBSCRIBE" }), false);
+                config.Ssl = ssl;
+
+                config.ResponseTimeout = Int32.MaxValue;
+                config.Password = password;
+                config.AllowAdmin = true;
+                config.AbortOnConnectFail = true;
+                //config.WriteBuffer = 64 * 1024 * 1024;
+                int port;
+                if(ssl)
+                    port = i % 2 == 0 ? 15000 : 15001;
+                else
+                    port = i % 2 == 0 ? 13000 : 13001;
+                //int port = ssl? 6380 : 6379;
+                config.EndPoints.Add(host, port);
                 cm[i] = ConnectionMultiplexer.Connect(config);
+                if(!cm[i].GetServer(host,port).IsSlave)
+                {
+                    chooseconnection = i;
+                    Console.WriteLine($"master is {chooseconnection}");
+                }
             }
             // Set test key
             value = new byte[size];
             (new Random()).NextBytes(value);
-            //cm[0].GetDatabase().StringSet("test", value);
-            for (int i = 0; i < numberofconnections; i++)
+            try
             {
-                DoRequest(cm[i]);
+                cm[0].GetDatabase().StringSet("test", value);
+            }
+            catch
+            {
+                Console.WriteLine("failed on 0, trying on 1");
+                cm[1].GetDatabase().StringSet("test", value);
+            }
+           // for (int i = 0; i < numberofconnections; i++)
+            {
+                DoRequest(cm[chooseconnection]);
             }
 
             while (true)
@@ -102,7 +125,7 @@ namespace ConsoleApplication115
                 });
             } else
             {
-                cm.GetDatabase().StringSetAsync(key, value).ContinueWith((v) =>
+                cm.GetDatabase().StringSetAsync(key, value,null, When.Always,CommandFlags.DemandMaster).ContinueWith((v) =>
                 {
                     if(v.IsFaulted)
                     {
